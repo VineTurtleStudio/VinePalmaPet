@@ -60,18 +60,41 @@ interface ConfigStore {
   loaded: boolean;
   load: () => Promise<void>;
   patch: (partial: Partial<PetConfig>) => void;
+  /** Writes the current config immediately, cancelling the pending debounce. */
+  flush: () => Promise<void>;
+  /** Re-reads the config from disk, applies `partial`, then writes it back immediately. */
+  applyAndFlush: (partial: Partial<PetConfig>) => Promise<void>;
 }
 
 let saveTimer: number | undefined;
+let pendingPatch: Partial<PetConfig> | null = null;
 
-function persist(config: PetConfig): void {
+async function writePatch(partial: Partial<PetConfig>): Promise<void> {
+  if (isTauri()) {
+    await invoke("patch_config", { patch: partial });
+  } else {
+    const stored = localStorage.getItem("vinepalmapet.config");
+    let current: Record<string, unknown> = {};
+    if (stored) {
+      try {
+        const parsed: unknown = JSON.parse(stored);
+        if (typeof parsed === "object" && parsed !== null) current = parsed as Record<string, unknown>;
+      } catch {
+        current = {};
+      }
+    }
+    localStorage.setItem("vinepalmapet.config", JSON.stringify({ ...current, ...partial }));
+  }
+}
+
+function persist(partial: Partial<PetConfig>): void {
+  pendingPatch = { ...(pendingPatch ?? {}), ...partial };
   if (saveTimer !== undefined) window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => {
-    if (isTauri()) {
-      invoke("save_config", { config }).catch((error) => console.error("save_config failed", error));
-    } else {
-      localStorage.setItem("vinepalmapet.config", JSON.stringify(config));
-    }
+    saveTimer = undefined;
+    const patch = pendingPatch;
+    pendingPatch = null;
+    if (patch) void writePatch(patch).catch((error) => console.error("patch_config failed", error));
   }, 250);
 }
 
@@ -98,6 +121,22 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
   patch: (partial) => {
     const next = normalize({ ...get().config, ...partial });
     set({ config: next });
-    persist(next);
+    persist(partial);
+  },
+
+  flush: async () => {
+    if (saveTimer !== undefined) {
+      window.clearTimeout(saveTimer);
+      saveTimer = undefined;
+    }
+    const patch = pendingPatch;
+    pendingPatch = null;
+    if (patch) await writePatch(patch);
+  },
+
+  applyAndFlush: async (partial) => {
+    await get().load();
+    get().patch(partial);
+    await get().flush();
   },
 }));

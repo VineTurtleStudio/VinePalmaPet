@@ -30,6 +30,22 @@
         "focus": false,
         "visible": true,
         "dragDropEnabled": false
+      },
+      {
+        "label": "settings",
+        "title": "VinePalmaPet 设置",
+        "url": "settings.html",
+        "width": 600,
+        "height": 700,
+        "minWidth": 480,
+        "minHeight": 540,
+        "resizable": true,
+        "maximizable": false,
+        "decorations": true,
+        "transparent": false,
+        "skipTaskbar": false,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {

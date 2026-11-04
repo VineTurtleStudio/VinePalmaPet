@@ -1,6 +1,8 @@
 import { useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 
 import { PetStage } from "../pet/PetStage";
+import { isTauri } from "../platform/desktop";
 import { useConfigStore } from "../store/config";
 
 export default function App() {
@@ -12,6 +14,25 @@ export default function App() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The settings window writes config to disk and pings us; re-read it here.
+  useEffect(() => {
+    if (!loaded || !isTauri()) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    void listen("pet://config-changed", () => {
+      void load();
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [loaded, load]);
 
   if (!loaded) return null;
 

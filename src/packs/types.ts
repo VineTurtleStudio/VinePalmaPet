@@ -31,6 +31,9 @@ export interface LoadedPetPack {
   meta: PetPackMeta;
   baseUrl: string;
   images: Record<string, HTMLImageElement>;
+  /** Object URLs created for imported packs; revoked by `dispose`. */
+  objectUrls?: string[];
+  dispose?: () => void;
 }
 
 export const DESIGN_SIZE = 320;

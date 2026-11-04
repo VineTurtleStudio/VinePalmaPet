@@ -5,7 +5,7 @@ import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
-import { loadPetPack } from "../packs/loader";
+import { loadSelectedPetPack } from "../packs/loader";
 import type { LoadedPetPack } from "../packs/types";
 import { PetEngine } from "./engine";
 import { Bubble, type BubbleMessage } from "./Bubble";
@@ -56,6 +56,7 @@ export function PetStage({ config, patch }: PetStageProps) {
   const mounted = useRef(false);
 
   const [pack, setPack] = useState<LoadedPetPack | null>(null);
+  const [packRevision, setPackRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -67,21 +68,51 @@ export function PetStage({ config, patch }: PetStageProps) {
   // --- load pet pack -------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
+    let loadedPack: LoadedPetPack | null = null;
     setReady(false);
     setPack(null);
     setError(null);
-    loadPetPack(config.petId)
+
+    loadSelectedPetPack(config.petId)
       .then((loaded) => {
-        if (!cancelled) setPack(loaded);
+        loadedPack = loaded;
+        if (cancelled) {
+          loaded.dispose?.();
+          return;
+        }
+        setPack(loaded);
+        // The selected pack may have been removed: fall back to the built-in pet.
+        if (loaded.meta.id !== config.petId) patch({ petId: loaded.meta.id });
       })
       .catch((err: unknown) => {
         console.error(err);
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       });
+
     return () => {
       cancelled = true;
+      loadedPack?.dispose?.();
     };
-  }, [config.petId]);
+  }, [config.petId, packRevision, patch]);
+
+  // Imported packs can be reinstalled or removed while the pet is running.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    void listen("pet://pets-changed", () => {
+      setPackRevision((value) => value + 1);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   // --- create the engine ---------------------------------------------------
   useEffect(() => {
@@ -206,6 +237,17 @@ export function PetStage({ config, patch }: PetStageProps) {
   // --- speech --------------------------------------------------------------
   const say = useCallback((text: string, duration = 3800) => {
     if (bubbleTimer.current !== null) window.clearTimeout(bubbleTimer.current);
+
+    if (!configRef.current.bubbleEnabled) {
+      setBubble(null);
+      engineRef.current?.playTalk();
+      bubbleTimer.current = window.setTimeout(() => {
+        engineRef.current?.endTalk();
+        bubbleTimer.current = null;
+      }, 1200);
+      return;
+    }
+
     setBubble({ id: Date.now() + Math.random(), text });
     engineRef.current?.playTalk();
     bubbleTimer.current = window.setTimeout(() => {
@@ -214,6 +256,16 @@ export function PetStage({ config, patch }: PetStageProps) {
       bubbleTimer.current = null;
     }, duration);
   }, []);
+
+  useEffect(() => {
+    if (config.bubbleEnabled) return;
+    if (bubbleTimer.current !== null) {
+      window.clearTimeout(bubbleTimer.current);
+      bubbleTimer.current = null;
+    }
+    setBubble(null);
+    engineRef.current?.endTalk();
+  }, [config.bubbleEnabled]);
 
   useEffect(
     () => () => {
@@ -355,6 +407,7 @@ export function PetStage({ config, patch }: PetStageProps) {
   return (
     <div
       className="stage"
+      data-pet-id={pack?.meta.id ?? config.petId}
       style={{ ["--s" as string]: config.scale }}
       onContextMenu={(event) => {
         event.preventDefault();

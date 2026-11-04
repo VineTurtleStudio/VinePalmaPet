@@ -11,18 +11,19 @@ export function logicalWindowSize(scale: number): number {
   return Math.round(DESIGN_SIZE * scale);
 }
 
-/** Places the pet near the bottom-right corner of the monitor it is currently on. */
+/** Places the pet near the bottom-right corner of the work area of the current monitor. */
 export async function placeByDefault(scale: number): Promise<void> {
   if (!isTauri()) return;
   const win = getCurrentWindow();
   const monitor = (await currentMonitor()) ?? (await availableMonitors())[0];
   if (!monitor) return;
 
+  const area = monitor.workArea ?? { position: monitor.position, size: monitor.size };
   const physicalSize = Math.round(logicalWindowSize(scale) * monitor.scaleFactor);
   const marginX = Math.round(36 * monitor.scaleFactor);
-  const marginY = Math.round(88 * monitor.scaleFactor);
-  const x = monitor.position.x + monitor.size.width - physicalSize - marginX;
-  const y = monitor.position.y + monitor.size.height - physicalSize - marginY;
+  const marginY = Math.round(24 * monitor.scaleFactor);
+  const x = area.position.x + area.size.width - physicalSize - marginX;
+  const y = area.position.y + area.size.height - physicalSize - marginY;
   await win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
 }
 
@@ -51,10 +52,11 @@ export async function snapToScreen(): Promise<void> {
   ]);
   if (!monitor) return;
 
-  const left = monitor.position.x;
-  const top = monitor.position.y;
-  const right = monitor.position.x + monitor.size.width;
-  const bottom = monitor.position.y + monitor.size.height;
+  const area = monitor.workArea ?? { position: monitor.position, size: monitor.size };
+  const left = area.position.x;
+  const top = area.position.y;
+  const right = area.position.x + area.size.width;
+  const bottom = area.position.y + area.size.height;
   const snap = Math.round(20 * monitor.scaleFactor);
 
   let x = position.x;
