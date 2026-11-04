@@ -4,7 +4,7 @@
 
 VinePalmaPet 用 **Tauri 2 + React + TypeScript** 构建：透明无边框窗口、帧动画状态机、像素级点击穿透、可导入的宠物包，以及一套沙箱化的插件系统。它不读取屏幕内容、不上传数据、不消耗模型 Token。
 
-> 状态：**M3 宠物包** — 内置角色、宠物包导入/切换、GIF 导入与设置窗口已可用。插件系统在 M4 落地。
+> 状态：**M4 插件系统** — 宠物包、GIF 导入、设置窗口与沙箱插件宿主均已可用。
 
 ---
 
@@ -30,7 +30,7 @@ VinePalmaPet 用 **Tauri 2 + React + TypeScript** 构建：透明无边框窗口
 | M1 | 帧动画、状态机、拖拽、吸附、位置/大小记忆 | ✅ |
 | M2 | 点击穿透、气泡、右键菜单、音效 | 🚧 穿透/气泡/菜单完成，音效待做 |
 | M3 | GIF 导入、宠物包导入/切换、设置窗口 | ✅ |
-| M4 | 插件宿主 + API + 内置插件 | ⏳ |
+| M4 | 插件宿主 + API + 内置插件 | ✅ |
 | M5 | 开机自启、多显示器打磨、安装包 | ⏳ |
 | M6 | 文档、模板、示例 | ⏳ |
 
@@ -43,7 +43,8 @@ VinePalmaPet 用 **Tauri 2 + React + TypeScript** 构建：透明无边框窗口
 - **大小可调**：60% – 160%，缩放时保持脚底锚点不动。
 - **宠物包驱动**：所有动画、状态、帧率都由 `pet.json` 描述，换宠物不需要改代码。
 - **导入自己的宠物**：设置窗口支持导入 zip 宠物包，也可以直接把一张 GIF 转成宠物；导入的包保存在应用数据目录，随时切换或删除。
-- **插件扩展**（规划）：iframe 沙箱 + 权限声明，功能以插件形式安装/卸载。
+- **插件扩展**：插件运行在 `sandbox="allow-scripts"` 的 iframe 中，能力需在清单里声明并由宿主逐条校验；内置番茄钟与喝水提醒，可导入 ZIP 插件。
+- **互不打扰**：插件异常、宠物包损坏都只影响自己，宠物窗口始终保留可用状态。
 
 ## 快速开始
 
@@ -85,19 +86,20 @@ $env:Path = "C:\nodejs\node-v24.22.2;$env:Path"
 
 ```text
 VinePalmaPet/
-├─ src/                     前端
+├─ src/
 │  ├─ app/                  应用壳
 │  ├─ pet/                  渲染引擎、状态机、气泡、菜单
 │  ├─ packs/                宠物包加载与校验
+│  ├─ plugins/              插件清单、沙箱 iframe 宿主与 RPC
 │  ├─ platform/             Tauri 桌面能力封装（拖拽/穿透/吸附）
-│  ├─ settings/             设置窗口（宠物包管理 / 显示选项）
+│  ├─ settings/             设置窗口（宠物包 / 插件 / 显示选项）
 │  ├─ store/                配置持久化
 │  └─ styles.css
-├─ src-tauri/               Rust 侧：透明窗、托盘、配置读写
+├─ src-tauri/               Rust 侧：透明窗、托盘、配置读写、包与插件导入
 ├─ public/pets/vine/        内置占位宠物包
-├─ plugins/                 内置插件（M4）
+├─ public/plugins/          内置插件（pomodoro / water）
 ├─ scripts/                 素材生成 / 宠物包打包 / 脚手架
-├─ docs/                    宠物包与插件文档（M6）
+├─ docs/                    宠物包与插件文档
 └─ src-tauri/tauri.conf.json
 ```
 
@@ -105,8 +107,9 @@ VinePalmaPet/
 
 ```text
 %APPDATA%\com.vineturtle.vinepalmapet\
-├─ config.json      # 缩放、置顶、宠物 ID、窗口坐标
-└─ pets\<id>\       # 导入的宠物包
+├─ config.json      # 缩放、置顶、宠物 ID、窗口坐标、插件开关与存储
+├─ pets\<id>\       # 导入的宠物包
+└─ plugins\<id>\    # 导入的插件
 ```
 
 设置窗口可以从托盘菜单的「设置…」或桌宠右键菜单的「设置…」打开。
@@ -161,13 +164,15 @@ pets/vine/
 
 设计目标：**功能插件化，本体保持干净**。
 
-- 插件放在 `%APPDATA%\VinePalmaPet\plugins\<id>\`，由 `plugin.json` 描述。
-- 运行在 `sandbox="allow-scripts"` 的 iframe 中，只能通过 `postMessage` RPC 调用宿主能力。
-- 能力需在清单中声明并在首次启用时确认：`pet.say` / `pet.play` / `menu` / `notify` / `storage` / `timer` / `http:<host>` 等。
-- 单个插件异常只会被禁用，不影响宠物本体。
-- 首个版本计划内置：番茄钟、分时问候、系统状态、时钟天气、宠物包管理器。
+- 插件是一个文件夹：`plugin.json` + 一个自包含的 HTML 入口。
+- 运行在 `sandbox="allow-scripts"` 的 iframe 中（不透明源），没有 Tauri、宿主 DOM 或本地存储权限。
+- 插件通过 `postMessage` RPC 调用宿主；宿主逐条检查清单里声明的权限：`pet.say` / `pet.state` / `pet.read` / `config.read`。
+- 文本长度、气泡时长、状态白名单和调用频率都由宿主限制；插件存储按 id 隔离。
+- 单个插件异常只会影响自己的 iframe，不会影响宠物渲染和交互。
+- 内置插件：**番茄钟**（25 分钟专注 + 5 分钟休息，会保存进度）和**喝水提醒**（启用 5 分钟后首次提醒，之后每 45 分钟一次），默认关闭。
+- 设置窗口支持启用/停用、试一下、导入 ZIP 和删除。
 
-> 详细 API 会在 M4 落地后写入 `docs/plugin-api.md`。
+插件格式、权限与完整 API 见 **[docs/plugin-api.md](docs/plugin-api.md)**。宠物包格式见 **[docs/pet-pack.md](docs/pet-pack.md)**。
 
 ## 开发脚本
 
@@ -188,7 +193,7 @@ pets/vine/
 - [x] 气泡对话（音效待补）
 - [x] GIF 导入 → 状态机
 - [x] 宠物包导入 / 校验 / 切换 / 设置窗口
-- [ ] 插件沙箱、权限与内置插件
+- [x] 插件沙箱、权限与内置插件
 - [ ] 开机自启、多显示器打磨
 - [ ] 安装包、自动更新
 - [ ] 文档与插件模板

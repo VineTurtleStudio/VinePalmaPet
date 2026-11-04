@@ -7,6 +7,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { loadSelectedPetPack } from "../packs/loader";
 import type { LoadedPetPack } from "../packs/types";
+import { PluginHost } from "../plugins/PluginHost";
 import { PetEngine } from "./engine";
 import { Bubble, type BubbleMessage } from "./Bubble";
 import { PetMenu } from "./PetMenu";
@@ -235,6 +236,14 @@ export function PetStage({ config, patch }: PetStageProps) {
   }, [config.alwaysOnTop, ready]);
 
   // --- speech --------------------------------------------------------------
+  const playState = useCallback((state: string) => {
+    const engine = engineRef.current;
+    if (!engine) return false;
+    // Plugins may end focus mode, but must not force their way past sleep or petting.
+    const force = state === "idle" && engine.currentState === "focus";
+    return engine.play(state, force);
+  }, []);
+
   const say = useCallback((text: string, duration = 3800) => {
     if (bubbleTimer.current !== null) window.clearTimeout(bubbleTimer.current);
 
@@ -429,6 +438,13 @@ export function PetStage({ config, patch }: PetStageProps) {
       onPointerCancel={handlePointerUp}
     >
       <canvas ref={canvasRef} className="pet-canvas" />
+      <PluginHost
+        config={config}
+        say={say}
+        playState={playState}
+        stateName={stateName}
+        petId={pack?.meta.id ?? config.petId}
+      />
       {bubble && <Bubble message={bubble} />}
       {menuOpen && (
         <PetMenu

@@ -189,6 +189,30 @@ body {
   }
 }
 
+/* ---------------------------------------------------------------- plugins */
+
+/*
+ * Plugins run in 1x1 sandboxed iframes so they can use timers without
+ * affecting layout. The opacity/pointer-events rules keep them invisible.
+ */
+.plugin-host {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.plugin-frame {
+  width: 1px;
+  height: 1px;
+  border: 0;
+}
+
 /* ----------------------------------------------------------------- error */
 
 .error-card {

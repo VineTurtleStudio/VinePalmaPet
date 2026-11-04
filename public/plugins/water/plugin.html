@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>喝水提醒</title>
+  </head>
+  <body>
+    <script>
+      (function () {
+        "use strict";
+
+        var INTERVAL_MS = 45 * 60 * 1000;
+        var FIRST_DELAY_MS = 5 * 60 * 1000;
+
+        function remind() {
+          VinePlugin.say("该喝水啦，顺便伸个懒腰 💧", 4200);
+          VinePlugin.storage.set("lastReminder", Date.now());
+        }
+
+        VinePlugin.onReady(function (info) {
+          var last = typeof info.storage.lastReminder === "number" ? info.storage.lastReminder : 0;
+          var wait = last ? Math.max(60000, last + INTERVAL_MS - Date.now()) : FIRST_DELAY_MS;
+
+          setTimeout(function loop() {
+            remind();
+            setTimeout(loop, INTERVAL_MS);
+          }, wait);
+        });
+
+        VinePlugin.on("plugin:test", remind);
+      })();
+    </script>
+  </body>
+</html>

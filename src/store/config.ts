@@ -1,6 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
 
+export type PluginValue = string | number | boolean | null;
+
+/** Per-plugin key/value storage and the ids of enabled plugins. */
+export interface PluginsConfig {
+  enabled: string[];
+  data: Record<string, Record<string, PluginValue>>;
+}
+
 export interface PetConfig {
   version: 1;
   petId: string;
@@ -9,6 +17,7 @@ export interface PetConfig {
   muted: boolean;
   bubbleEnabled: boolean;
   position: { x: number; y: number } | null;
+  plugins: PluginsConfig;
 }
 
 export const DEFAULT_CONFIG: PetConfig = {
@@ -19,6 +28,7 @@ export const DEFAULT_CONFIG: PetConfig = {
   muted: false,
   bubbleEnabled: true,
   position: null,
+  plugins: { enabled: [], data: {} },
 };
 
 export const MIN_SCALE = 0.6;
@@ -31,6 +41,48 @@ function isTauri(): boolean {
 function clampScale(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_CONFIG.scale;
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function isPluginValue(value: unknown): value is PluginValue {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  );
+}
+
+function normalizePlugins(raw: unknown): PluginsConfig {
+  const value = isRecord(raw) ? raw : {};
+  const enabled = Array.isArray(value.enabled)
+    ? [
+        ...new Set(
+          value.enabled.filter(
+            (id): id is string => typeof id === "string" && id.length > 0 && id.length <= 64,
+          ),
+        ),
+      ].slice(0, 64)
+    : [];
+
+  const data: Record<string, Record<string, PluginValue>> = {};
+  if (isRecord(value.data)) {
+    for (const [id, store] of Object.entries(value.data).slice(0, 64)) {
+      if (!isRecord(store)) continue;
+      const clean: Record<string, PluginValue> = {};
+      for (const [key, item] of Object.entries(store).slice(0, 64)) {
+        if (key.length === 0 || key.length > 64) continue;
+        if (typeof item === "string" && item.length > 2000) continue;
+        if (isPluginValue(item)) clean[key] = item;
+      }
+      data[id] = clean;
+    }
+  }
+
+  return { enabled, data };
 }
 
 function normalize(raw: unknown): PetConfig {
@@ -52,6 +104,7 @@ function normalize(raw: unknown): PetConfig {
     muted: value.muted === true,
     bubbleEnabled: value.bubbleEnabled !== false,
     position,
+    plugins: normalizePlugins(value.plugins),
   };
 }
 
@@ -60,6 +113,8 @@ interface ConfigStore {
   loaded: boolean;
   load: () => Promise<void>;
   patch: (partial: Partial<PetConfig>) => void;
+  /** Updates the in-memory config without scheduling a disk write. */
+  applyLocal: (partial: Partial<PetConfig>) => void;
   /** Writes the current config immediately, cancelling the pending debounce. */
   flush: () => Promise<void>;
   /** Re-reads the config from disk, applies `partial`, then writes it back immediately. */
@@ -122,6 +177,10 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     const next = normalize({ ...get().config, ...partial });
     set({ config: next });
     persist(partial);
+  },
+
+  applyLocal: (partial) => {
+    set({ config: normalize({ ...get().config, ...partial }) });
   },
 
   flush: async () => {

@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "water",
+  "name": "喝水提醒",
+  "version": "1.0.0",
+  "description": "每 45 分钟提醒你补充水分，第一次提醒在启用 5 分钟后。",
+  "author": "VineTurtleStudio",
+  "permissions": ["pet.say"],
+  "entry": "plugin.html"
+}

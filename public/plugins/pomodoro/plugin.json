@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "pomodoro",
+  "name": "番茄钟",
+  "version": "1.0.0",
+  "description": "25 分钟专注 + 5 分钟休息，进入专注时桌宠会安静下来。",
+  "author": "VineTurtleStudio",
+  "permissions": ["pet.say", "pet.state"],
+  "entry": "plugin.html"
+}

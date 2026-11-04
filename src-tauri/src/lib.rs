@@ -1,5 +1,6 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde_json::Value;
 use tauri::{
@@ -8,9 +9,59 @@ use tauri::{
     Emitter, Manager, WindowEvent,
 };
 
+mod files;
 mod pets;
+mod plugins;
 
 struct PetMenu(Menu<tauri::Wry>);
+
+/// Serializes read-modify-write cycles so two windows cannot overwrite each
+/// other's changes while both are updating the config.
+static CONFIG_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_config() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+    CONFIG_LOCK
+        .lock()
+        .map_err(|_| "config lock is poisoned".to_string())
+}
+
+fn read_config_value(path: &Path) -> Result<Value, String> {
+    if !path.exists() {
+        return Ok(Value::Object(Default::default()));
+    }
+    let raw = fs::read_to_string(path).map_err(|err| format!("cannot read config: {err}"))?;
+    let raw = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
+    Ok(serde_json::from_str(raw).unwrap_or_else(|_| Value::Object(Default::default())))
+}
+
+fn write_config_value(path: &Path, value: &Value) -> Result<(), String> {
+    let raw = serde_json::to_string_pretty(value).map_err(|err| err.to_string())?;
+    fs::write(path, raw).map_err(|err| format!("cannot write config: {err}"))
+}
+
+/// Makes sure `plugins.enabled` and `plugins.data` exist and have the right shape.
+fn ensure_plugins(root: &mut Value) -> &mut serde_json::Map<String, Value> {
+    if !root.is_object() {
+        *root = serde_json::json!({});
+    }
+    let object = root.as_object_mut().expect("root is an object");
+
+    let plugins = object
+        .entry("plugins")
+        .or_insert_with(|| serde_json::json!({}));
+    if !plugins.is_object() {
+        *plugins = serde_json::json!({});
+    }
+    let plugins = plugins.as_object_mut().expect("plugins is an object");
+
+    if !plugins.get("enabled").is_some_and(Value::is_array) {
+        plugins.insert("enabled".into(), serde_json::json!([]));
+    }
+    if !plugins.get("data").is_some_and(Value::is_object) {
+        plugins.insert("data".into(), serde_json::json!({}));
+    }
+    plugins
+}
 
 /// Location of the persisted app config:
 /// `%APPDATA%\com.vineturtle.vinepalmapet\config.json`
@@ -26,18 +77,15 @@ fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 #[tauri::command]
 fn load_config(app: tauri::AppHandle) -> Result<Value, String> {
     let path = config_path(&app)?;
-    if !path.exists() {
-        return Ok(Value::Object(Default::default()));
-    }
-    let raw = fs::read_to_string(&path).map_err(|err| format!("cannot read config: {err}"))?;
-    serde_json::from_str(&raw).map_err(|err| format!("invalid config json: {err}"))
+    let _guard = lock_config()?;
+    read_config_value(&path)
 }
 
 #[tauri::command]
 fn save_config(app: tauri::AppHandle, config: Value) -> Result<(), String> {
     let path = config_path(&app)?;
-    let raw = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
-    fs::write(&path, raw).map_err(|err| format!("cannot write config: {err}"))
+    let _guard = lock_config()?;
+    write_config_value(&path, &config)
 }
 
 /// Merges top-level keys into the persisted config. Used by both windows so that,
@@ -46,14 +94,9 @@ fn save_config(app: tauri::AppHandle, config: Value) -> Result<(), String> {
 #[tauri::command]
 fn patch_config(app: tauri::AppHandle, patch: Value) -> Result<Value, String> {
     let path = config_path(&app)?;
-    let mut current = if path.exists() {
-        let raw = fs::read_to_string(&path).map_err(|err| format!("cannot read config: {err}"))?;
-        let raw = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
-        serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::Object(Default::default()))
-    } else {
-        Value::Object(Default::default())
-    };
+    let _guard = lock_config()?;
 
+    let mut current = read_config_value(&path)?;
     if !current.is_object() {
         current = Value::Object(Default::default());
     }
@@ -63,9 +106,87 @@ fn patch_config(app: tauri::AppHandle, patch: Value) -> Result<Value, String> {
         }
     }
 
-    let raw = serde_json::to_string_pretty(&current).map_err(|err| err.to_string())?;
-    fs::write(&path, raw).map_err(|err| format!("cannot write config: {err}"))?;
+    write_config_value(&path, &current)?;
     Ok(current)
+}
+
+/// Toggles one plugin without replacing the rest of `plugins`, so a delayed
+/// storage write from the pet window cannot undo a settings change.
+#[tauri::command]
+fn set_plugin_enabled(app: tauri::AppHandle, id: String, enabled: bool) -> Result<Value, String> {
+    if !files::valid_id(&id) {
+        return Err("非法的插件 id".to_string());
+    }
+
+    let path = config_path(&app)?;
+    let _guard = lock_config()?;
+    let mut root = read_config_value(&path)?;
+    let plugins = ensure_plugins(&mut root);
+    let list = plugins
+        .get_mut("enabled")
+        .and_then(Value::as_array_mut)
+        .expect("enabled is an array");
+    list.retain(|item| item.as_str() != Some(id.as_str()));
+
+    if enabled {
+        if list.len() >= 64 {
+            return Err("最多同时启用 64 个插件".to_string());
+        }
+        list.push(Value::String(id));
+    }
+
+    write_config_value(&path, &root)?;
+    Ok(root["plugins"].clone())
+}
+
+/// Writes a single key of one plugin's storage. Storage is always allowed and
+/// does not touch the enabled list.
+#[tauri::command]
+fn set_plugin_storage(
+    app: tauri::AppHandle,
+    plugin_id: String,
+    key: String,
+    value: Value,
+) -> Result<Value, String> {
+    if !files::valid_id(&plugin_id) {
+        return Err("非法的插件 id".to_string());
+    }
+    if key.is_empty() || key.len() > 64 {
+        return Err("存储键不合法".to_string());
+    }
+    match &value {
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+        Value::String(text) if text.encode_utf16().count() <= 2000 => {}
+        _ => return Err("只支持 string / number / boolean / null".to_string()),
+    }
+
+    let path = config_path(&app)?;
+    let _guard = lock_config()?;
+    let mut root = read_config_value(&path)?;
+    let plugins = ensure_plugins(&mut root);
+    let data = plugins
+        .get_mut("data")
+        .and_then(Value::as_object_mut)
+        .expect("data is an object");
+
+    let store = data
+        .entry(plugin_id)
+        .or_insert_with(|| serde_json::json!({}));
+    if !store.is_object() {
+        *store = serde_json::json!({});
+    }
+    let store = store.as_object_mut().expect("plugin storage is an object");
+    if value.is_null() {
+        store.remove(&key);
+    } else {
+        store.insert(key, value);
+    }
+    if store.len() > 64 {
+        return Err("插件的存储键太多了".to_string());
+    }
+
+    write_config_value(&path, &root)?;
+    Ok(root["plugins"].clone())
 }
 
 #[tauri::command]
@@ -118,6 +239,8 @@ pub fn run() {
             load_config,
             save_config,
             patch_config,
+            set_plugin_enabled,
+            set_plugin_storage,
             quit_app,
             open_settings,
             show_pet_menu,
@@ -125,7 +248,11 @@ pub fn run() {
             pets::import_pet_pack,
             pets::remove_pet_pack,
             pets::read_pet_file,
-            pets::import_gif_pack
+            pets::import_gif_pack,
+            plugins::list_plugins,
+            plugins::import_plugin,
+            plugins::remove_plugin,
+            plugins::read_plugin_file
         ])
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();

@@ -1,18 +1,13 @@
 use std::fs;
-use std::io::Write;
-use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::{Path, PathBuf};
 
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine as _;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::Manager;
 
+use crate::files;
+
 const BUILTIN_ID: &str = "vine";
-const MAX_PACK_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_PACK_ENTRIES: usize = 512;
-const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_GIF_FRAMES: usize = 60;
 const MAX_ATLAS_WIDTH: u32 = 16_000;
 
@@ -39,28 +34,9 @@ fn pets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn valid_id(id: &str) -> bool {
-    let mut chars = id.chars();
-    match chars.next() {
-        Some(first) if first.is_ascii_alphanumeric() => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
-
-fn read_json(path: &Path) -> Option<Value> {
-    let raw = fs::read_to_string(path).ok()?;
-    let raw = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
-    serde_json::from_str(raw).ok()
-}
-
-fn string_field(value: &Value, key: &str) -> Option<String> {
-    value.get(key).and_then(Value::as_str).map(str::to_owned)
-}
-
 fn is_pet_pack(meta: &Value) -> bool {
     meta.get("schema").and_then(Value::as_u64) == Some(1)
-        && meta.get("id").and_then(Value::as_str).is_some_and(valid_id)
+        && meta.get("id").and_then(Value::as_str).is_some_and(files::valid_id)
         && meta
             .get("name")
             .and_then(Value::as_str)
@@ -68,16 +44,16 @@ fn is_pet_pack(meta: &Value) -> bool {
 }
 
 fn pack_info(dir: &Path) -> Option<PetPackInfo> {
-    let meta = read_json(&dir.join("pet.json"))?;
+    let meta = files::read_json(&dir.join("pet.json"))?;
     if !is_pet_pack(&meta) {
         return None;
     }
     Some(PetPackInfo {
-        id: string_field(&meta, "id")?,
-        name: string_field(&meta, "name")?,
-        author: string_field(&meta, "author"),
-        license: string_field(&meta, "license"),
-        description: string_field(&meta, "description"),
+        id: files::string_field(&meta, "id")?,
+        name: files::string_field(&meta, "name")?,
+        author: files::string_field(&meta, "author"),
+        license: files::string_field(&meta, "license"),
+        description: files::string_field(&meta, "description"),
         builtin: false,
         dir: Some(dir.to_string_lossy().to_string()),
     })
@@ -129,36 +105,7 @@ fn unique_id(dir: &Path, base: &str) -> String {
             return candidate;
         }
     }
-    format!("{base}-{}", timestamp_millis())
-}
-
-fn timestamp_millis() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or(0)
-}
-
-fn find_pack_root(temp: &Path) -> Result<PathBuf, String> {
-    if temp.join("pet.json").is_file() {
-        return Ok(temp.to_path_buf());
-    }
-
-    let mut roots = Vec::new();
-    if let Ok(entries) = fs::read_dir(temp) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && path.join("pet.json").is_file() {
-                roots.push(path);
-            }
-        }
-    }
-
-    match roots.len() {
-        1 => Ok(roots.remove(0)),
-        0 => Err("压缩包里没有找到 pet.json".to_string()),
-        _ => Err("压缩包里有多个宠物包，请一次只放一个".to_string()),
-    }
+    format!("{base}-{}", files::timestamp_millis())
 }
 
 #[tauri::command]
@@ -169,51 +116,27 @@ pub fn import_pet_pack(app: tauri::AppHandle, zip_path: String) -> Result<PetPac
     }
 
     let pets = pets_dir(&app)?;
-    let temp = pets.join(format!(".import-{}-{}", std::process::id(), timestamp_millis()));
+    let temp = pets.join(format!(
+        ".import-{}-{}",
+        std::process::id(),
+        files::timestamp_millis()
+    ));
     fs::create_dir_all(&temp).map_err(|err| format!("cannot create temp dir: {err}"))?;
 
     let result = (|| {
-        let file = fs::File::open(&source).map_err(|err| format!("cannot open zip: {err}"))?;
-        let mut archive =
-            zip::ZipArchive::new(file).map_err(|err| format!("invalid zip: {err}"))?;
+        files::extract_zip(&source, &temp)?;
 
-        if archive.len() > MAX_PACK_ENTRIES {
-            return Err(format!("压缩包文件太多（最多 {MAX_PACK_ENTRIES} 个）"));
-        }
-
-        let mut total = 0u64;
-        for index in 0..archive.len() {
-            let mut entry = archive
-                .by_index(index)
-                .map_err(|err| format!("cannot read zip entry: {err}"))?;
-            let Some(relative) = entry.enclosed_name() else {
-                continue;
-            };
-            if entry.is_dir() {
-                continue;
-            }
-            total = total.saturating_add(entry.size());
-            if total > MAX_PACK_BYTES {
-                return Err("压缩包解压后超过 64 MB 限制".to_string());
-            }
-            let target = temp.join(&relative);
-            if let Some(parent) = target.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|err| format!("cannot create pack dir: {err}"))?;
-            }
-            let mut out =
-                fs::File::create(&target).map_err(|err| format!("cannot write file: {err}"))?;
-            std::io::copy(&mut entry, &mut out)
-                .map_err(|err| format!("cannot extract file: {err}"))?;
-        }
-
-        let root = find_pack_root(&temp)?;
-        let meta = read_json(&root.join("pet.json"))
+        let root = files::find_manifest_root(
+            &temp,
+            "pet.json",
+            "压缩包里有多个宠物包，请一次只放一个",
+        )?;
+        let meta = files::read_json(&root.join("pet.json"))
             .ok_or_else(|| "pet.json 不是有效的 JSON".to_string())?;
         if !is_pet_pack(&meta) {
             return Err("pet.json 缺少合法的 schema / id / name".to_string());
         }
-        let id = string_field(&meta, "id").unwrap_or_default();
+        let id = files::string_field(&meta, "id").unwrap_or_default();
 
         let target = pets.join(&id);
         if target.exists() {
@@ -238,7 +161,7 @@ pub fn import_pet_pack(app: tauri::AppHandle, zip_path: String) -> Result<PetPac
 
 #[tauri::command]
 pub fn remove_pet_pack(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    if !valid_id(&id) {
+    if !files::valid_id(&id) {
         return Err("非法的宠物包 id".to_string());
     }
     if id == BUILTIN_ID {
@@ -253,38 +176,15 @@ pub fn remove_pet_pack(app: tauri::AppHandle, id: String) -> Result<(), String> 
 
 #[tauri::command]
 pub fn read_pet_file(app: tauri::AppHandle, id: String, file: String) -> Result<String, String> {
-    if !valid_id(&id) {
+    if !files::valid_id(&id) {
         return Err("非法的宠物包 id".to_string());
     }
-
-    let relative = Path::new(&file);
-    if relative.is_absolute()
-        || relative
-            .components()
-            .any(|part| !matches!(part, Component::Normal(_)))
-    {
-        return Err("非法的文件名".to_string());
-    }
-
-    let dir = pets_dir(&app)?.join(&id);
-    let canonical_dir = dir
-        .canonicalize()
-        .map_err(|_| "宠物包不存在".to_string())?;
-    let path = dir.join(relative);
-    let canonical = path
-        .canonicalize()
-        .map_err(|_| format!("宠物包里没有 {file}"))?;
-    if !canonical.starts_with(&canonical_dir) {
-        return Err("非法的文件路径".to_string());
-    }
-
-    let meta = fs::metadata(&canonical).map_err(|err| format!("cannot stat file: {err}"))?;
-    if meta.len() > MAX_FILE_BYTES {
-        return Err("宠物包文件超过 32 MB 限制".to_string());
-    }
-
-    let bytes = fs::read(&canonical).map_err(|err| format!("cannot read file: {err}"))?;
-    Ok(BASE64.encode(bytes))
+    files::read_file_base64(
+        &pets_dir(&app)?.join(&id),
+        &file,
+        "宠物包不存在",
+        &format!("宠物包里没有 {file}"),
+    )
 }
 
 fn clear_rect(canvas: &mut [u8], width: u32, x: u32, y: u32, w: u32, h: u32) {
@@ -440,7 +340,7 @@ pub fn import_gif_pack(
     let pets = pets_dir(&app)?;
     let slug = slugify(&display_name);
     let base_id = if slug.is_empty() {
-        format!("gif-{}", timestamp_millis())
+        format!("gif-{}", files::timestamp_millis())
     } else {
         format!("gif-{slug}")
     };
@@ -480,12 +380,7 @@ pub fn import_gif_pack(
         }
     });
 
-    let raw = serde_json::to_string_pretty(&meta).map_err(|err| err.to_string())?;
-    let mut meta_file =
-        fs::File::create(target.join("pet.json")).map_err(|err| format!("cannot write pet.json: {err}"))?;
-    meta_file
-        .write_all(raw.as_bytes())
-        .map_err(|err| format!("cannot write pet.json: {err}"))?;
+    files::write_json(&target.join("pet.json"), &meta)?;
 
     pack_info(&target).ok_or_else(|| "生成的宠物包无法读取".to_string())
 }

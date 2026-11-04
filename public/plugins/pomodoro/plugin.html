@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>番茄钟</title>
+  </head>
+  <body>
+    <script>
+      (function () {
+        "use strict";
+
+        var WORK_MS = 25 * 60 * 1000;
+        var BREAK_MS = 5 * 60 * 1000;
+        var timer = null;
+        var phase = "idle";
+        var endAt = 0;
+
+        function clearTimer() {
+          if (timer !== null) {
+            clearTimeout(timer);
+            timer = null;
+          }
+        }
+
+        function schedule(ms) {
+          clearTimer();
+          timer = setTimeout(tick, Math.max(1000, ms));
+        }
+
+        function save() {
+          VinePlugin.storage.set("phase", phase);
+          VinePlugin.storage.set("endAt", endAt);
+        }
+
+        function beginWork(announce) {
+          phase = "work";
+          endAt = Date.now() + WORK_MS;
+          save();
+          VinePlugin.setState("focus");
+          if (announce) VinePlugin.say("番茄钟开始：专注 25 分钟 🍅", 4200);
+          schedule(endAt - Date.now());
+        }
+
+        function beginBreak(announce) {
+          phase = "break";
+          endAt = Date.now() + BREAK_MS;
+          save();
+          VinePlugin.setState("idle");
+          if (announce) VinePlugin.say("时间到！休息 5 分钟吧 ☕", 4200);
+          schedule(endAt - Date.now());
+        }
+
+        function tick() {
+          if (phase === "work") beginBreak(true);
+          else beginWork(true);
+        }
+
+        function demo() {
+          VinePlugin.say("番茄钟演示：专注 10 秒", 3000);
+          VinePlugin.setState("focus");
+          setTimeout(function () {
+            VinePlugin.say("演示结束，继续加油！", 3000);
+            if (phase === "work") VinePlugin.setState("focus");
+            else VinePlugin.setState("idle");
+          }, 10000);
+        }
+
+        VinePlugin.onReady(function (info) {
+          var storage = info.storage || {};
+          phase = typeof storage.phase === "string" ? storage.phase : "idle";
+          endAt = typeof storage.endAt === "number" ? storage.endAt : 0;
+
+          if (phase === "work" || phase === "break") {
+            var remaining = endAt - Date.now();
+            if (remaining <= 0) tick();
+            else schedule(remaining);
+            if (phase === "work") VinePlugin.setState("focus");
+          } else {
+            beginWork(true);
+          }
+        });
+
+        VinePlugin.on("plugin:test", demo);
+      })();
+    </script>
+  </body>
+</html>
