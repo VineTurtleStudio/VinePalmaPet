@@ -207,7 +207,7 @@ export function PetStage({ config, patch }: PetStageProps) {
   const say = useCallback((text: string, duration = 3800) => {
     if (bubbleTimer.current !== null) window.clearTimeout(bubbleTimer.current);
     setBubble({ id: Date.now() + Math.random(), text });
-    engineRef.current?.play("talk");
+    engineRef.current?.playTalk();
     bubbleTimer.current = window.setTimeout(() => {
       setBubble(null);
       engineRef.current?.endTalk();
@@ -301,6 +301,55 @@ export function PetStage({ config, patch }: PetStageProps) {
     if (isTauri()) void invoke("quit_app");
   }, []);
 
+  // Native menu actions are delivered from Rust as simple action ids.
+  useEffect(() => {
+    if (!ready || !isTauri()) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    void listen<string>("pet://action", ({ payload }) => {
+      switch (payload) {
+        case "pat":
+          pat();
+          break;
+        case "focus":
+          toggleFocus();
+          break;
+        case "sleep":
+          sleep();
+          break;
+        case "talk":
+          say(pick(TALK_LINES));
+          break;
+        case "scale-down":
+          changeScale(-0.1);
+          break;
+        case "scale-up":
+          changeScale(0.1);
+          break;
+        case "toggle-top":
+          toggleAlwaysOnTop();
+          break;
+        case "reset":
+          resetPosition();
+          break;
+        case "quit":
+          quit();
+          break;
+        default:
+          break;
+      }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [ready, pat, toggleFocus, sleep, say, changeScale, toggleAlwaysOnTop, resetPosition, quit]);
+
   const scaleLabel = useMemo(() => `${Math.round(config.scale * 100)}%`, [config.scale]);
 
   return (
@@ -309,7 +358,11 @@ export function PetStage({ config, patch }: PetStageProps) {
       style={{ ["--s" as string]: config.scale }}
       onContextMenu={(event) => {
         event.preventDefault();
-        setMenuOpen((open) => !open);
+        if (isTauri()) {
+          void invoke("show_pet_menu").catch((err) => console.error("show_pet_menu failed", err));
+        } else {
+          setMenuOpen((open) => !open);
+        }
       }}
       onPointerDown={(event) => {
         if (menuOpen) {

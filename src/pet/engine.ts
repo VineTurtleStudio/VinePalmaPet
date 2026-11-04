@@ -101,6 +101,14 @@ export class PetEngine {
     return true;
   }
 
+  /**
+   * Talking is a lightweight overlay: it only takes over an idle pet so that
+   * focus / sleep / petting animations are not interrupted by a speech bubble.
+   */
+  playTalk(): void {
+    if (this.stateName === "idle" || this.stateName === "talk") this.play("talk", true);
+  }
+
   /** Returns to idle only when the current state is still "talk". */
   endTalk(): void {
     if (this.stateName === "talk") this.play("idle", true);

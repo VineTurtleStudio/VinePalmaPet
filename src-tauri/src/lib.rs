@@ -3,10 +3,12 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{ContextMenu, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent, Emitter,
+    Emitter, Manager, WindowEvent,
 };
+
+struct PetMenu(Menu<tauri::Wry>);
 
 /// Location of the persisted app config:
 /// `%APPDATA%\com.vineturtle.vinepalmapet\config.json`
@@ -41,6 +43,16 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// Pops the native context menu at the current cursor position.
+#[tauri::command]
+fn show_pet_menu(app: tauri::AppHandle, menu: tauri::State<'_, PetMenu>) -> Result<(), String> {
+    let webview = app
+        .get_webview_window("pet")
+        .ok_or_else(|| "pet window is not available".to_string())?;
+    let window = webview.as_ref().window();
+    menu.0.popup(window).map_err(|err| err.to_string())
+}
+
 fn toggle_pet_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("pet") {
         let visible = window.is_visible().unwrap_or(false);
@@ -56,7 +68,19 @@ fn toggle_pet_window(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_config, save_config, quit_app])
+        .invoke_handler(tauri::generate_handler![
+            load_config,
+            save_config,
+            quit_app,
+            show_pet_menu
+        ])
+        .on_menu_event(|app, event| {
+            let id = event.id().as_ref();
+            println!("[menu] {id}");
+            if let Some(action) = id.strip_prefix("pet:") {
+                let _ = app.emit_to("pet", "pet://action", action.to_string());
+            }
+        })
         .setup(|app| {
             let toggle = MenuItem::with_id(app, "toggle", "显示 / 隐藏", true, None::<&str>)?;
             let reset = MenuItem::with_id(app, "reset", "回到默认位置", true, None::<&str>)?;
@@ -70,6 +94,35 @@ pub fn run() {
                     &quit,
                 ],
             )?;
+
+            // Native context menu for the pet itself.
+            let pet_pat = MenuItem::with_id(app, "pet:pat", "摸摸头", true, None::<&str>)?;
+            let pet_focus = MenuItem::with_id(app, "pet:focus", "专注模式 / 结束专注", true, None::<&str>)?;
+            let pet_sleep = MenuItem::with_id(app, "pet:sleep", "睡一会儿", true, None::<&str>)?;
+            let pet_talk = MenuItem::with_id(app, "pet:talk", "说句话", true, None::<&str>)?;
+            let pet_scale_down = MenuItem::with_id(app, "pet:scale-down", "缩小", true, None::<&str>)?;
+            let pet_scale_up = MenuItem::with_id(app, "pet:scale-up", "放大", true, None::<&str>)?;
+            let pet_top = MenuItem::with_id(app, "pet:toggle-top", "切换窗口置顶", true, None::<&str>)?;
+            let pet_reset = MenuItem::with_id(app, "pet:reset", "回到默认位置", true, None::<&str>)?;
+            let pet_quit = MenuItem::with_id(app, "pet:quit", "退出 VinePalmaPet", true, None::<&str>)?;
+
+            let pet_menu = Menu::with_items(
+                app,
+                &[
+                    &pet_pat,
+                    &pet_focus,
+                    &pet_sleep,
+                    &pet_talk,
+                    &PredefinedMenuItem::separator(app)?,
+                    &pet_scale_down,
+                    &pet_scale_up,
+                    &pet_top,
+                    &pet_reset,
+                    &PredefinedMenuItem::separator(app)?,
+                    &pet_quit,
+                ],
+            )?;
+            app.manage(PetMenu(pet_menu));
 
             let mut builder = TrayIconBuilder::with_id("main-tray")
                 .tooltip("VinePalmaPet")
