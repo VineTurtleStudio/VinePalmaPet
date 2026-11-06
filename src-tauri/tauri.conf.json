@@ -55,6 +55,10 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "publisher": "VineTurtleStudio",
+    "copyright": "Copyright © 2026 VineTurtleStudio",
+    "shortDescription": "A 2D desktop pet with a plugin system.",
+    "longDescription": "VinePalmaPet is a transparent 2D desktop pet with pet packs, GIF import and sandboxed plugins.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -64,7 +68,9 @@
     ],
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true
       }
     }
   }

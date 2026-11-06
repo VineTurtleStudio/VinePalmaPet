@@ -425,6 +425,14 @@ input {
   color: var(--text);
 }
 
+.row__hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-style: normal;
+}
+
 .row--toggle {
   cursor: pointer;
 }

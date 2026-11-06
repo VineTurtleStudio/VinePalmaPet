@@ -1,7 +1,66 @@
 import { availableMonitors, currentMonitor, cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
+import type { Monitor } from "@tauri-apps/api/window";
 import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 
 export const DESIGN_SIZE = 320;
+
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function workAreaOf(monitor: Monitor): Rect {
+  const area = monitor.workArea ?? { position: monitor.position, size: monitor.size };
+  return {
+    x: area.position.x,
+    y: area.position.y,
+    width: area.size.width,
+    height: area.size.height,
+  };
+}
+
+function overlap(a: Rect, b: Rect): number {
+  const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return width > 0 && height > 0 ? width * height : 0;
+}
+
+/**
+ * Picks the monitor that overlaps `rect` the most. When the rect is completely
+ * off-screen (for example after a monitor was unplugged) it falls back to the
+ * monitor closest to its centre, so the pet can always be recovered.
+ */
+function pickMonitor(monitors: Monitor[], rect: Rect): Monitor | null {
+  if (monitors.length === 0) return null;
+
+  let best = monitors[0] ?? null;
+  let bestOverlap = 0;
+  for (const monitor of monitors) {
+    const area = overlap(rect, workAreaOf(monitor));
+    if (area > bestOverlap) {
+      bestOverlap = area;
+      best = monitor;
+    }
+  }
+  if (bestOverlap > 0) return best;
+
+  const centerX = rect.x + rect.width / 2;
+  const centerY = rect.y + rect.height / 2;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const monitor of monitors) {
+    const area = workAreaOf(monitor);
+    const dx = Math.max(area.x - centerX, 0, centerX - (area.x + area.width));
+    const dy = Math.max(area.y - centerY, 0, centerY - (area.y + area.height));
+    const distance = dx * dx + dy * dy;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = monitor;
+    }
+  }
+  return best;
+}
 
 export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -15,15 +74,16 @@ export function logicalWindowSize(scale: number): number {
 export async function placeByDefault(scale: number): Promise<void> {
   if (!isTauri()) return;
   const win = getCurrentWindow();
-  const monitor = (await currentMonitor()) ?? (await availableMonitors())[0];
-  if (!monitor) return;
+  const [monitorList, monitor] = await Promise.all([availableMonitors(), currentMonitor()]);
+  const target = monitor ?? monitorList[0] ?? null;
+  if (!target) return;
 
-  const area = monitor.workArea ?? { position: monitor.position, size: monitor.size };
-  const physicalSize = Math.round(logicalWindowSize(scale) * monitor.scaleFactor);
-  const marginX = Math.round(36 * monitor.scaleFactor);
-  const marginY = Math.round(24 * monitor.scaleFactor);
-  const x = area.position.x + area.size.width - physicalSize - marginX;
-  const y = area.position.y + area.size.height - physicalSize - marginY;
+  const area = workAreaOf(target);
+  const physicalSize = Math.round(logicalWindowSize(scale) * target.scaleFactor);
+  const marginX = Math.round(36 * target.scaleFactor);
+  const marginY = Math.round(24 * target.scaleFactor);
+  const x = area.x + area.width - physicalSize - marginX;
+  const y = area.y + area.height - physicalSize - marginY;
   await win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
 }
 
@@ -45,18 +105,22 @@ export async function applyScale(next: number, previous: number): Promise<void> 
 export async function snapToScreen(): Promise<void> {
   if (!isTauri()) return;
   const win = getCurrentWindow();
-  const [position, size, monitor] = await Promise.all([
+  const [position, size, monitors] = await Promise.all([
     win.outerPosition(),
     win.outerSize(),
-    currentMonitor(),
+    availableMonitors(),
   ]);
+  const rect = { x: position.x, y: position.y, width: size.width, height: size.height };
+  // Use all monitors instead of `currentMonitor()` so a window restored on a
+  // monitor that no longer exists is moved back to the nearest visible one.
+  const monitor = pickMonitor(monitors, rect) ?? (await currentMonitor());
   if (!monitor) return;
 
-  const area = monitor.workArea ?? { position: monitor.position, size: monitor.size };
-  const left = area.position.x;
-  const top = area.position.y;
-  const right = area.position.x + area.size.width;
-  const bottom = area.position.y + area.size.height;
+  const area = workAreaOf(monitor);
+  const left = area.x;
+  const top = area.y;
+  const right = area.x + area.width;
+  const bottom = area.y + area.height;
   const snap = Math.round(20 * monitor.scaleFactor);
 
   let x = position.x;

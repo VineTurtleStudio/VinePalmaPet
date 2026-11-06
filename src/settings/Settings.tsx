@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { listPlugins } from "../plugins/registry";
 import { PERMISSION_INFO, type PluginInfo } from "../plugins/types";
+import { getAutoStart, setAutoStart } from "../platform/autostart";
 import {
   BUILTIN_PET_ID,
   importGifPack,
@@ -44,6 +45,8 @@ export function Settings() {
 
   const [packs, setPacks] = useState<PetPackInfo[]>([]);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [autoStart, setAutoStartState] = useState<boolean | null>(null);
+  const [autoStartBusy, setAutoStartBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [gifName, setGifName] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -59,11 +62,16 @@ export function Settings() {
     setPlugins(await listPlugins());
   }, []);
 
+  const refreshAutoStart = useCallback(async () => {
+    setAutoStartState(await getAutoStart());
+  }, []);
+
   useEffect(() => {
     void load();
     void refreshPacks();
     void refreshPlugins();
-  }, [load, refreshPacks, refreshPlugins]);
+    void refreshAutoStart();
+  }, [load, refreshPacks, refreshPlugins, refreshAutoStart]);
 
   // The Rust side pings this window whenever it is shown again.
   useEffect(() => {
@@ -75,6 +83,7 @@ export function Settings() {
       void load();
       void refreshPacks();
       void refreshPlugins();
+      void refreshAutoStart();
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
@@ -84,7 +93,7 @@ export function Settings() {
       cancelled = true;
       unlisten?.();
     };
-  }, [load, refreshPacks, refreshPlugins]);
+  }, [load, refreshPacks, refreshPlugins, refreshAutoStart]);
 
   const toast = (text: string) => {
     setError(null);
@@ -224,6 +233,22 @@ export function Settings() {
       toast("已让桌宠回到默认位置");
     } catch (err) {
       fail(err);
+    }
+  };
+
+  const handleToggleAutoStart = async (enabled: boolean) => {
+    if (autoStartBusy) return;
+    setAutoStartBusy(true);
+    try {
+      const next = await setAutoStart(enabled);
+      setAutoStartState(next);
+      toast(next ? "已开启开机自启" : "已关闭开机自启");
+    } catch (err) {
+      fail(err);
+      // Keep the checkbox in sync with the real OS state after a failure.
+      setAutoStartState(await getAutoStart());
+    } finally {
+      setAutoStartBusy(false);
     }
   };
 
@@ -510,6 +535,21 @@ export function Settings() {
             checked={config.bubbleEnabled}
             disabled={busy}
             onChange={(event) => void handleApply({ bubbleEnabled: event.target.checked })}
+          />
+        </label>
+
+        <label className="row row--toggle" title="登录 Windows 后自动在托盘启动">
+          <span className="row__label">
+            开机自启
+            <em className="row__hint">
+              {autoStart === null ? "当前环境不可用" : "登录 Windows 后自动启动"}
+            </em>
+          </span>
+          <input
+            type="checkbox"
+            checked={autoStart === true}
+            disabled={autoStartBusy || autoStart === null}
+            onChange={(event) => void handleToggleAutoStart(event.target.checked)}
           />
         </label>
 

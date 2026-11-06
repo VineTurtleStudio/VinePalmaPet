@@ -8,6 +8,9 @@ dist-ssr/
 # rust
 src-tauri/target/
 
+# generated Tauri capability schemas
+src-tauri/gen/schemas/
+
 # editor / os
 .vscode/*
 !.vscode/extensions.json
