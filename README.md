@@ -32,7 +32,7 @@ VinePalmaPet 用 **Tauri 2 + React + TypeScript** 构建：透明无边框窗口
 | M3 | GIF 导入、宠物包导入/切换、设置窗口 | ✅ |
 | M4 | 插件宿主 + API + 内置插件 | ✅ |
 | M5 | 开机自启、多显示器打磨、安装包 | ✅ |
-| M6 | 文档、模板、示例 | 🚧 宠物包与插件文档已完成 |
+| M6 | 文档、模板、示例 | ✅ |
 
 ## 特性
 
@@ -104,8 +104,9 @@ VinePalmaPet/
 ├─ src-tauri/               Rust 侧：透明窗、托盘、配置读写、包与插件导入
 ├─ public/pets/vine/        内置占位宠物包
 ├─ public/plugins/          内置插件（pomodoro / water）
-├─ scripts/                 素材生成 / 宠物包打包 / 脚手架
+├─ scripts/                 素材生成 / 宠物包与插件打包
 ├─ docs/                    宠物包与插件文档
+├─ examples/                可导入的宠物包 / 插件模板
 └─ src-tauri/tauri.conf.json
 ```
 
@@ -178,7 +179,7 @@ pets/vine/
 - 内置插件：**番茄钟**（25 分钟专注 + 5 分钟休息，会保存进度）和**喝水提醒**（启用 5 分钟后首次提醒，之后每 45 分钟一次），默认关闭。
 - 设置窗口支持启用/停用、试一下、导入 ZIP 和删除。
 
-插件格式、权限与完整 API 见 **[docs/plugin-api.md](docs/plugin-api.md)**。宠物包格式见 **[docs/pet-pack.md](docs/pet-pack.md)**。
+插件格式、权限与完整 API 见 **[docs/plugin-api.md](docs/plugin-api.md)**；宠物包格式见 **[docs/pet-pack.md](docs/pet-pack.md)**。可直接导入的模板见 **[examples/](examples/)**。
 
 ## 开发脚本
 
@@ -189,6 +190,7 @@ pets/vine/
 | `npm run build` | TypeScript 检查 + 前端构建 |
 | `npm run tauri:build` | 打包安装程序 |
 | `powershell -File scripts/make-placeholder-pet.ps1` | 重新生成占位宠物素材 |
+| `powershell -File scripts/pack.ps1 -Source <目录> [-Output <zip>]` | 把宠物包或插件目录打包成可导入的 zip |
 
 ## 路线图
 
@@ -203,7 +205,7 @@ pets/vine/
 - [x] 开机自启、多显示器打磨
 - [x] 安装包（NSIS，当前用户安装）
 - [ ] 自动更新
-- [ ] 文档与插件模板
+- [x] 文档与插件模板
 
 ## 许可证
 

@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "my-plugin",
+  "name": "我的插件",
+  "version": "1.0.0",
+  "description": "VinePalmaPet plugin template - greets once and reacts to the test button.",
+  "author": "your name",
+  "permissions": ["pet.say", "pet.state", "pet.read"],
+  "entry": "plugin.html"
+}

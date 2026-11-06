@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>我的插件</title>
+  </head>
+  <body>
+    <script>
+      (function () {
+        "use strict";
+
+        // 首次加载时打个招呼；把 greeted 存进自己的命名空间，重启后不会重复。
+        VinePlugin.onReady(async function (info) {
+          console.log("[my-plugin] ready", info);
+
+          var greeted = (await VinePlugin.storage.get("greeted")) === true;
+          if (!greeted) {
+            await VinePlugin.storage.set("greeted", true);
+            VinePlugin.say("你好，我是新插件！", 3000);
+          }
+        });
+
+        // 设置窗口里的「试一下」会触发这个事件，方便验证插件是否正常运行。
+        VinePlugin.on("plugin:test", async function () {
+          try {
+            var pet = await VinePlugin.getPet();
+            VinePlugin.say(
+              pet.state === "focus" ? "专注中，测试消息不会打断你。" : "插件运行正常！",
+              3000,
+            );
+            await VinePlugin.setState("celebrate");
+          } catch (error) {
+            console.error("[my-plugin]", error);
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

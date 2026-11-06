@@ -12,6 +12,12 @@ my-plugin/
 
 `plugin.json` 引用的入口文件必须位于插件目录内，扩展名为 `.html`，不允许 `../` 或绝对路径。
 
+可直接导入的最小插件见 [examples/plugin-template](../examples/plugin-template/)，打包命令：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\pack.ps1 -Source examples\plugin-template -Output my-plugin.zip
+```
+
 ## 安装位置与导入
 
 - 内置插件：`public/plugins/<id>/`，随应用打包，目前有 `pomodoro`（番茄钟）和 `water`（喝水提醒）。

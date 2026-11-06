@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "id": "my-pet",
+  "name": "My Pet",
+  "author": "your name",
+  "license": "CC-BY-4.0",
+  "description": "VinePalmaPet pet pack template - replace the atlas files with your own art.",
+  "frame": { "width": 256, "height": 256 },
+  "anchor": { "x": 0.5, "y": 1.0 },
+  "bubble": { "x": 0.5, "y": 0.06 },
+  "animations": {
+    "idle": { "file": "idle.png", "frames": 8, "fps": 7, "loop": false },
+    "blink": { "file": "blink.png", "frames": 4, "fps": 12, "loop": false },
+    "happy": { "file": "happy.png", "frames": 12, "fps": 14, "loop": false }
+  },
+  "states": {
+    "idle": {
+      "anims": ["idle", "idle", "idle", "blink"],
+      "loop": true,
+      "priority": 0
+    },
+    "pat": { "anims": ["happy"], "next": "idle", "priority": 30 },
+    "celebrate": { "anims": ["happy"], "next": "idle", "priority": 40 },
+    "focus": { "anims": ["idle"], "loop": true, "priority": 10 },
+    "sleep": { "anims": ["idle"], "loop": true, "priority": 20 },
+    "talk": { "anims": ["idle"], "loop": true, "priority": 15 }
+  }
+}

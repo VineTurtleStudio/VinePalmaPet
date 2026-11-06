@@ -102,7 +102,13 @@ my-pet/
    ```
 3. 填写 `frames` 与 `fps`。
 
-> GIF 导入已经内置在设置窗口中；把文件夹打成 zip 也可以用任意压缩工具完成，`scripts/pack-pet.mjs` 仍在规划中。
+> GIF 导入已经内置在设置窗口中；文件夹可以用任意压缩工具打包，仓库也提供了 `scripts/pack.ps1`：
+>
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File scripts\pack.ps1 -Source examples\pet-pack-template -Output my-pet.zip
+> ```
+>
+> 可直接导入的示例见 [examples/pet-pack-template](../examples/pet-pack-template/)。
 
 ## 从 GIF 导入
 
