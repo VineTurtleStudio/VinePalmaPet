@@ -216,3 +216,10 @@ npm run tauri:build  # パッケージ（Windows は NSIS インストーラ）
 - **マルチモニタ** — 画面をまたいで移動しても位置を補正
 
 > 実装の詳細（マイルストーン、プラグイン API、ペットパック仕様）は [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)。
+---
+
+## 许可 / License
+
+本项目以 [MIT](./LICENSE) 许可证发布。
+
+Licensed under the [MIT License](./LICENSE).
